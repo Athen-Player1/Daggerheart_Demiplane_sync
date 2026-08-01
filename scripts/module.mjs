@@ -93,7 +93,7 @@ async function showImportDialog() {
                 event.preventDefault();
                 const url = new FormData(event.currentTarget).get('url');
                 await importFromUrl(url);
-                event.currentTarget.closest('.app')?.querySelector('.header-button.close')?.click();
+                root.closest('.app')?.querySelector('.header-button.close')?.click();
             });
             root.querySelector('[data-action="cancel"]')?.addEventListener('click', event => {
                 event.currentTarget.closest('.app')?.querySelector('.header-button.close')?.click();
@@ -105,7 +105,16 @@ async function showImportDialog() {
 async function importFromUrl(url) {
     validateUrl(url);
     const normalized = await fetchAndParse(url);
-    const actor = await Actor.create(buildActorData(normalized));
+
+    // Foundryborne's Daggerheart character model has a rich default attack Action.
+    // In Foundry v14, passing a partial `system` object at Actor.create time can
+    // suppress/poison those nested defaults and causes Action validation failures.
+    // Create the actor with only document-level data first, then apply partial
+    // system updates after the system has initialized its own defaults.
+    const actor = await Actor.create(buildActorCreateData(normalized));
+    if (!actor) throw new Error('Actor creation failed; Foundry did not return a created actor.');
+
+    await actor.update(buildActorPostCreateUpdate(normalized));
     await syncImportedItems(actor, normalized);
     ui.notifications.info(game.i18n.format('DEMIPLANE_DH.notifications.imported', { name: actor.name }));
     actor.sheet?.render(true);
@@ -148,11 +157,17 @@ function validateUrl(url) {
     if (!extractDemiplaneCharacterId(url)) throw new Error(game.i18n.localize('DEMIPLANE_DH.notifications.invalidUrl'));
 }
 
-function buildActorData(normalized) {
+function buildActorCreateData(normalized) {
     return {
         name: normalized.name,
         type: 'character',
         img: normalized.img,
+        flags: buildFlags(normalized)
+    };
+}
+
+function buildActorPostCreateUpdate(normalized) {
+    return {
         system: buildSystemUpdate(normalized),
         flags: buildFlags(normalized)
     };
@@ -200,32 +215,73 @@ async function syncImportedItems(actor, normalized) {
         .map(item => item.id);
     if (oldImportedIds.length) await actor.deleteEmbeddedDocuments('Item', oldImportedIds);
 
-    const wanted = [
-        normalized.selections.class && { kind: 'class', ...normalized.selections.class },
-        normalized.selections.subclass && { kind: 'subclass', ...normalized.selections.subclass },
-        normalized.selections.ancestry && { kind: 'ancestry', ...normalized.selections.ancestry },
-        normalized.selections.community && { kind: 'community', ...normalized.selections.community },
-        ...normalized.selections.domainCards.map(x => ({ kind: 'domain', ...x })),
-        ...normalized.selections.equipment.map(x => ({ kind: guessEquipmentKind(x), ...x })),
-        ...normalized.selections.customEquipment.map(x => ({ kind: 'loot', ...x }))
-    ].filter(Boolean);
+    const selections = {
+        class: normalized.selections.class && { kind: 'class', ...normalized.selections.class },
+        ancestry: normalized.selections.ancestry && { kind: 'ancestry', ...normalized.selections.ancestry },
+        community: normalized.selections.community && { kind: 'community', ...normalized.selections.community },
+        subclass: normalized.selections.subclass && { kind: 'subclass', ...normalized.selections.subclass },
+        domains: normalized.selections.domainCards.map(x => ({ kind: 'domain', ...x })),
+        equipment: normalized.selections.equipment.map(x => ({ kind: guessEquipmentKind(x), ...x })),
+        customEquipment: normalized.selections.customEquipment.map(x => ({ kind: 'loot', ...x }))
+    };
 
-    const itemData = [];
     const missing = [];
-    for (const selection of wanted) {
-        const found = await findPackItem(selection.kind, selection.name);
-        if (found) {
-            const data = found.toObject();
-            data.flags = foundry.utils.mergeObject(data.flags ?? {}, itemFlags(selection));
-            itemData.push(data);
-        } else {
-            missing.push(`${selection.kind}: ${selection.name}`);
-            itemData.push(buildPlaceholderLoot(selection));
+    const createSelectionBatch = async batch => {
+        const itemData = [];
+        for (const selection of batch.filter(Boolean)) {
+            const found = await findPackItem(selection.kind, selection.name);
+            if (found) {
+                const data = found.toObject();
+                data.flags = foundry.utils.mergeObject(data.flags ?? {}, itemFlags(selection));
+                itemData.push(data);
+            } else {
+                missing.push(`${selection.kind}: ${selection.name}`);
+                itemData.push(buildPlaceholderLoot(selection));
+            }
         }
+        if (!itemData.length) return [];
+        return actor.createEmbeddedDocuments('Item', itemData);
+    };
+
+    // Foundryborne validates some item types against already-created actor state:
+    // subclass and domain cards require a class to exist, and domain cards require
+    // the class domains to be known. Create dependency-bearing items in waves.
+    const createdClassItems = await createSelectionBatch([selections.class]);
+    await applyClassDerivedStats(actor, createdClassItems[0], normalized);
+    await createSelectionBatch([selections.ancestry, selections.community]);
+    await createSelectionBatch([selections.subclass]);
+    await createSelectionBatch(selections.equipment);
+    await createSelectionBatch(selections.domains);
+    await createSelectionBatch(selections.customEquipment);
+
+    await actor.setFlag(MODULE_ID, 'missingCompendiumMatches', missing);
+}
+
+async function applyClassDerivedStats(actor, classItem, normalized) {
+    if (!classItem) return;
+    const update = {};
+    const suggestedTraits = classItem.system?.characterGuide?.suggestedTraits;
+    for (const [trait, value] of Object.entries(suggestedTraits ?? {})) {
+        foundry.utils.setProperty(update, `system.traits.${trait}.value`, Number(value) || 0);
     }
 
-    if (itemData.length) await actor.createEmbeddedDocuments('Item', itemData);
-    await actor.setFlag(MODULE_ID, 'missingCompendiumMatches', missing);
+    if (Number.isNumeric?.(classItem.system?.evasion) || Number.isFinite(Number(classItem.system?.evasion))) {
+        foundry.utils.setProperty(update, 'system.evasion', Number(classItem.system.evasion));
+    }
+
+    const hpBonus = normalized.selections.levelUps.filter(x => x.slug === 'add-hp').length;
+    const baseHp = Number(classItem.system?.hitPoints);
+    if (Number.isFinite(baseHp)) {
+        foundry.utils.setProperty(update, 'system.resources.hitPoints.max', baseHp + hpBonus);
+    }
+
+    const evasionBonus = normalized.selections.levelUps.filter(x => x.slug === 'increase-evasion').length;
+    if (evasionBonus) {
+        const currentEvasion = Number(foundry.utils.getProperty(update, 'system.evasion') ?? actor.system.evasion ?? 0);
+        foundry.utils.setProperty(update, 'system.evasion', currentEvasion + evasionBonus);
+    }
+
+    if (!foundry.utils.isEmpty(update)) await actor.update(update);
 }
 
 function itemFlags(selection) {
@@ -243,10 +299,6 @@ function buildPlaceholderLoot(selection) {
     return {
         name: selection.name,
         type: 'loot',
-        system: {
-            description: `<p>Imported placeholder for Demiplane ${selection.kind}. No matching Foundryborne compendium item was found.</p>`,
-            quantity: 1
-        },
         flags: itemFlags(selection)
     };
 }
