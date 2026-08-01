@@ -38,6 +38,6 @@
       "path": "lang/en.json"
     }
   ],
-  "manifest": "https://raw.githubusercontent.com/Athen-Player1/Daggerheart_Demiplane_sync/main/module.json",
-  "download": "https://github.com/Athen-Player1/Daggerheart_Demiplane_sync/releases/download/0.1.5/demiplane-daggerheart-importer-0.1.5.zip"
+  "manifest": "https://raw.githubusercontent.com/Athen-Player1/Demiplane_Daggerheart_Importer/main/module.json",
+  "download": "https://github.com/Athen-Player1/Demiplane_Daggerheart_Importer/releases/download/0.1.5/demiplane-daggerheart-importer-0.1.5.zip"
 }

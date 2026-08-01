@@ -15,13 +15,13 @@ The module is designed for GMs who build or maintain characters in Demiplane but
 Use this manifest URL in Foundry's **Install Module** dialog:
 
 ```text
-https://raw.githubusercontent.com/Athen-Player1/Daggerheart_Demiplane_sync/main/module.json
+https://raw.githubusercontent.com/Athen-Player1/Demiplane_Daggerheart_Importer/main/module.json
 ```
 
 Or download the latest zip from the GitHub releases page:
 
 ```text
-https://github.com/Athen-Player1/Daggerheart_Demiplane_sync/releases
+https://github.com/Athen-Player1/Demiplane_Daggerheart_Importer/releases
 ```
 
 After installation, enable the module in your Daggerheart world.
@@ -80,7 +80,6 @@ Imported actors can be refreshed from their saved Demiplane URL.
 Depending on Foundry/Foundryborne UI behaviour, use one of these paths:
 
 - Open the actor sheet and click **Update from Demiplane** if the button is visible.
-- Right-click the actor in the Actors directory and choose **Update from Demiplane** if the context action is visible.
 - Use the console API below as a fallback.
 
 If an actor does not have a saved source URL, the module prompts for one before updating.
@@ -178,8 +177,7 @@ Try:
 
 1. Hard refresh the browser.
 2. Close and reopen the actor sheet.
-3. Right-click the actor in the Actors directory.
-4. Use the console API fallback.
+3. Use the console API fallback.
 
 The console should log when a sheet button is injected:
 
