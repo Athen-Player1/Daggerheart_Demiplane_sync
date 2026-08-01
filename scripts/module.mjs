@@ -232,6 +232,14 @@ async function syncImportedItems(actor, normalized) {
             const found = await findPackItem(selection.kind, selection.name);
             if (found) {
                 const data = found.toObject();
+                // Preserve the compendium origin. Foundryborne's Daggerheart system
+                // uses Item#sourceUuid to validate subclass <-> class links. A plain
+                // toObject/createEmbeddedDocuments copy can lose that origin, making a
+                // perfectly valid subclass look unrelated to its class.
+                data._stats = foundry.utils.mergeObject(data._stats ?? {}, {
+                    compendiumSource: found.uuid,
+                    duplicateSource: found.uuid
+                });
                 data.flags = foundry.utils.mergeObject(data.flags ?? {}, itemFlags(selection));
                 itemData.push(data);
             } else {
