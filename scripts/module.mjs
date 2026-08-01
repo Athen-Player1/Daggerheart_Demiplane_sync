@@ -41,15 +41,18 @@ Hooks.on('getActorDirectoryEntryContext', (_html, options) => {
     });
 });
 
-Hooks.on('renderActorSheet', (app, html) => {
-    const actor = app.actor ?? app.document;
+Hooks.on('renderActorSheet', injectUpdateButton);
+Hooks.on('renderActorSheetV2', injectUpdateButton);
+Hooks.on('renderApplicationV2', injectUpdateButton);
+Hooks.on('renderCharacterSheet', injectUpdateButton);
+
+function injectUpdateButton(app, htmlOrElement) {
+    const actor = app.actor ?? app.document ?? app.object;
     if (actor?.type !== 'character') return;
 
-    const roots = [app.element, html]
-        .map(element => (element instanceof jQuery ? element[0] : element))
-        .filter(element => element instanceof HTMLElement);
-    const root = roots.find(element => !element.querySelector('.demiplane-dh-update-button'));
-    if (!root) return;
+    const root = htmlOrElement instanceof jQuery ? htmlOrElement[0] : htmlOrElement;
+    if (!(root instanceof HTMLElement)) return;
+    if (root.querySelector('.demiplane-dh-update-button')) return;
 
     const button = document.createElement('button');
     button.type = 'button';
@@ -60,13 +63,14 @@ Hooks.on('renderActorSheet', (app, html) => {
         updateActorFromSavedUrl(actor);
     });
 
-    const titleArea = root.querySelector('.window-header')
-        ?? root.querySelector('.window-title')
+    const target = root.querySelector('.character-header-sheet .downtime-section')
+        ?? root.querySelector('.character-header-sheet .name-row')
+        ?? root.querySelector('.character-header-sheet')
         ?? root.querySelector('header')
-        ?? root.querySelector('form')
         ?? root;
-    titleArea.append(button);
-});
+    target.append(button);
+    console.log(`${MODULE_ID} | Added update button to ${actor.name}`);
+}
 
 function getActorFromDirectoryEntry(li) {
     const element = li instanceof jQuery ? li[0] : li;
@@ -134,14 +138,48 @@ async function importFromUrl(url) {
 
 async function updateActorFromSavedUrl(actor) {
     if (!actor) return;
-    const url = actor.getFlag(MODULE_ID, 'sourceUrl');
-    if (!url) return ui.notifications.warn(game.i18n.localize('DEMIPLANE_DH.notifications.noUrl'));
+    let url = actor.getFlag(MODULE_ID, 'sourceUrl');
+    if (!url) {
+        url = await promptForActorSourceUrl(actor);
+        if (!url) return;
+    }
 
     const normalized = await fetchAndParse(url);
     await actor.update(buildActorUpdate(normalized));
     await syncImportedItems(actor, normalized);
     ui.notifications.info(game.i18n.format('DEMIPLANE_DH.notifications.updated', { name: actor.name }));
     actor.sheet?.render(false);
+}
+
+async function promptForActorSourceUrl(actor) {
+    const content = await foundry.applications.handlebars.renderTemplate(TEMPLATE, { url: '' });
+    return new Promise(resolve => {
+        new Dialog({
+            title: `${game.i18n.localize('DEMIPLANE_DH.controls.update')}: ${actor.name}`,
+            content,
+            buttons: {},
+            close: () => resolve(null),
+            render: html => {
+                const root = html instanceof jQuery ? html[0] : html;
+                root.querySelector('form')?.addEventListener('submit', async event => {
+                    event.preventDefault();
+                    const url = new FormData(event.currentTarget).get('url');
+                    try {
+                        validateUrl(url);
+                        await actor.setFlag(MODULE_ID, 'sourceUrl', url);
+                        resolve(url);
+                        root.closest('.app')?.querySelector('.header-button.close')?.click();
+                    } catch (error) {
+                        ui.notifications.error(error.message);
+                    }
+                });
+                root.querySelector('[data-action="cancel"]')?.addEventListener('click', event => {
+                    resolve(null);
+                    event.currentTarget.closest('.app')?.querySelector('.header-button.close')?.click();
+                });
+            }
+        }).render(true);
+    });
 }
 
 async function fetchAndParse(url) {

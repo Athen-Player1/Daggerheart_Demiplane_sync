@@ -14,12 +14,10 @@
     padding: 0.2rem 0.45rem;
     font-size: 0.8rem;
     line-height: 1;
-    z-index: 1000;
 }
 
-form .demiplane-dh-sheet-action,
-.window-content .demiplane-dh-sheet-action {
-    position: absolute;
-    top: 0.4rem;
-    right: 3rem;
+.character-header-sheet .demiplane-dh-sheet-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
 }
