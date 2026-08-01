@@ -262,6 +262,7 @@ async function syncImportedItems(actor, normalized) {
     const oldImportedIds = actor.items
         .filter(item => item.getFlag(MODULE_ID, 'imported'))
         .map(item => item.id);
+    await cleanupImportedEffects(actor, oldImportedIds);
     if (oldImportedIds.length) await actor.deleteEmbeddedDocuments('Item', oldImportedIds);
 
     const selections = {
@@ -290,6 +291,10 @@ async function syncImportedItems(actor, normalized) {
                     duplicateSource: found.uuid
                 });
                 data.flags = foundry.utils.mergeObject(data.flags ?? {}, itemFlags(selection));
+                data.effects = (data.effects ?? []).map(effect => {
+                    effect.flags = foundry.utils.mergeObject(effect.flags ?? {}, itemFlags(selection));
+                    return effect;
+                });
                 itemData.push(data);
             } else {
                 missing.push(`${selection.kind}: ${selection.name}`);
@@ -312,6 +317,27 @@ async function syncImportedItems(actor, normalized) {
     await createSelectionBatch(selections.customEquipment);
 
     await actor.setFlag(MODULE_ID, 'missingCompendiumMatches', missing);
+}
+
+async function cleanupImportedEffects(actor, oldImportedIds = []) {
+    const oldItemIds = new Set(oldImportedIds);
+    const effectIds = actor.effects
+        .filter(effect => {
+            if (effect.getFlag(MODULE_ID, 'imported')) return true;
+
+            const itemId = String(effect.origin ?? '').match(/\.Item\.([^.]+)/)?.[1];
+            if (!itemId) return false;
+            if (oldItemIds.has(itemId)) return true;
+
+            const sourceItem = actor.items.get(itemId);
+            // Transferred item effects can survive after their source item is deleted.
+            // Clean those orphaned actor-level effects during import refreshes to
+            // prevent one extra copy per Demiplane update.
+            return !sourceItem || Boolean(sourceItem.getFlag(MODULE_ID, 'imported'));
+        })
+        .map(effect => effect.id);
+
+    if (effectIds.length) await actor.deleteEmbeddedDocuments('ActiveEffect', effectIds);
 }
 
 async function applyClassDerivedStats(actor, classItem, normalized) {
