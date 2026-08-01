@@ -5,3 +5,21 @@
 .demiplane-dh-update-button {
     margin-left: 0.25rem;
 }
+
+.demiplane-dh-sheet-action {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: max-content;
+    max-height: 2rem;
+    padding: 0.2rem 0.45rem;
+    font-size: 0.8rem;
+    line-height: 1;
+    z-index: 1000;
+}
+
+form .demiplane-dh-sheet-action,
+.window-content .demiplane-dh-sheet-action {
+    position: absolute;
+    top: 0.4rem;
+    right: 3rem;
+}

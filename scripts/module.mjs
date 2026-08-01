@@ -36,35 +36,46 @@ Hooks.on('getActorDirectoryEntryContext', (_html, options) => {
     options.push({
         name: game.i18n.localize('DEMIPLANE_DH.controls.update'),
         icon: '<i class="fa-solid fa-rotate"></i>',
-        condition: li => {
-            const actor = game.actors.get(li.dataset.documentId);
-            return actor?.type === 'character' && Boolean(actor.getFlag(MODULE_ID, 'sourceUrl'));
-        },
-        callback: li => updateActorFromSavedUrl(game.actors.get(li.dataset.documentId))
+        condition: li => getActorFromDirectoryEntry(li)?.type === 'character',
+        callback: li => updateActorFromSavedUrl(getActorFromDirectoryEntry(li))
     });
 });
 
 Hooks.on('renderActorSheet', (app, html) => {
-    const actor = app.actor;
+    const actor = app.actor ?? app.document;
     if (actor?.type !== 'character') return;
-    const sourceUrl = actor.getFlag(MODULE_ID, 'sourceUrl');
-    if (!sourceUrl) return;
 
-    const root = html instanceof jQuery ? html[0] : html;
-    if (!root || root.querySelector('.demiplane-dh-update-button')) return;
+    const roots = [app.element, html]
+        .map(element => (element instanceof jQuery ? element[0] : element))
+        .filter(element => element instanceof HTMLElement);
+    const root = roots.find(element => !element.querySelector('.demiplane-dh-update-button'));
+    if (!root) return;
 
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'demiplane-dh-update-button';
+    button.className = 'demiplane-dh-update-button demiplane-dh-sheet-action';
     button.innerHTML = `<i class="fa-solid fa-rotate"></i> ${game.i18n.localize('DEMIPLANE_DH.controls.update')}`;
     button.addEventListener('click', event => {
         event.preventDefault();
         updateActorFromSavedUrl(actor);
     });
 
-    const titleArea = root.querySelector('.window-title') ?? root.querySelector('header') ?? root;
+    const titleArea = root.querySelector('.window-header')
+        ?? root.querySelector('.window-title')
+        ?? root.querySelector('header')
+        ?? root.querySelector('form')
+        ?? root;
     titleArea.append(button);
 });
+
+function getActorFromDirectoryEntry(li) {
+    const element = li instanceof jQuery ? li[0] : li;
+    const id = element?.dataset?.documentId
+        ?? element?.dataset?.entryId
+        ?? element?.closest?.('[data-document-id]')?.dataset?.documentId
+        ?? element?.closest?.('[data-entry-id]')?.dataset?.entryId;
+    return id ? game.actors.get(id) : null;
+}
 
 Hooks.on('getSceneControlButtons', controls => {
     const tokenControls = controls.tokens ?? controls.find?.(c => c.name === 'token')?.tools;
